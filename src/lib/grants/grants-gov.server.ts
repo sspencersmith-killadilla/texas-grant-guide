@@ -33,6 +33,21 @@ export function decodeEntities(input: string): string {
 function categorize(text: string): GrantCategory {
   const t = text.toLowerCase();
   const rules: [GrantCategory, string[]][] = [
+    [
+      "culture",
+      [
+        "library",
+        "libraries",
+        "librarian",
+        "museum",
+        "archive",
+        "humanities",
+        "arts",
+        "cultural",
+        "literacy",
+      ],
+    ],
+    ["tourism", ["tourism", "tourist", "travel promotion", "visitor", "heritage tourism"]],
     ["water", ["water", "wastewater", "sewer", "drought", "watershed", "stormwater", "drinking"]],
     ["transportation", ["transportation", "transit", "highway", "roadway", "bridge", "bicycle", "pedestrian", "airport", "rail"]],
     ["public-safety", ["police", "law enforcement", "crime", "fire", "firefighter", "safety", "justice", "violence"]],
@@ -41,8 +56,9 @@ function categorize(text: string): GrantCategory {
     ["broadband", ["broadband", "internet", "digital equity", "telecommunications"]],
     ["housing", ["housing", "homeless", "shelter", "rental"]],
     ["energy", ["energy", "solar", "emission", "air quality", "electric vehicle", "efficiency"]],
-    ["community", ["community development", "downtown", "economic development", "historic", "preservation", "planning", "arts"]],
+    ["community", ["community development", "downtown", "economic development", "historic", "preservation", "planning"]],
   ];
+
   for (const [cat, words] of rules) {
     if (words.some((w) => t.includes(w))) return cat;
   }
