@@ -11,6 +11,7 @@ export const listGrants = createServerFn({ method: "GET" }).handler(async (): Pr
   federalError: string | null;
 }> => {
   const { TEXAS_GRANTS } = await import("./grants/texas");
+  const { FEDERAL_CURATED_GRANTS } = await import("./grants/federal-curated");
   let federal: Grant[] = [];
   let federalError: string | null = null;
 
@@ -28,19 +29,23 @@ export const listGrants = createServerFn({ method: "GET" }).handler(async (): Pr
     }
   }
 
-  return { grants: [...TEXAS_GRANTS, ...federal], federalError };
+  return { grants: [...TEXAS_GRANTS, ...FEDERAL_CURATED_GRANTS, ...federal], federalError };
 });
 
 export const getGrant = createServerFn({ method: "GET" })
   .inputValidator((data: unknown) => z.object({ id: z.string().min(1) }).parse(data))
   .handler(async ({ data }): Promise<Grant | null> => {
     if (data.id.startsWith("fed-")) {
+      const { FEDERAL_CURATED_GRANTS } = await import("./grants/federal-curated");
+      const curated = FEDERAL_CURATED_GRANTS.find((g) => g.id === data.id);
+      if (curated) return curated;
       const { fetchFederalGrantDetail } = await import("./grants/grants-gov.server");
       return fetchFederalGrantDetail(data.id);
     }
     const { TEXAS_GRANTS } = await import("./grants/texas");
     return TEXAS_GRANTS.find((g) => g.id === data.id) ?? null;
   });
+
 
 const summarySchema = z.object({
   id: z.string(),
