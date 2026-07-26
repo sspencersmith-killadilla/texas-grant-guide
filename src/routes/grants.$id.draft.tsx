@@ -28,7 +28,7 @@ export const Route = createFileRoute("/grants/$id/draft")({
       },
     ],
   }),
-  component: DraftWizard;
+  component: DraftWizard,
 });
 
 function DraftWizard() {
