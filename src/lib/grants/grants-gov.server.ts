@@ -100,6 +100,8 @@ export async function fetchFederalGrantDetail(rawId: string): Promise<Grant | nu
   const syn = data?.synopsis as
     | {
         agencyName?: string;
+        agencyDetails?: { agencyName?: string };
+        topAgencyDetails?: { agencyName?: string };
         synopsisDesc?: string;
         responseDate?: string;
         responseDateDesc?: string;
@@ -115,26 +117,24 @@ export async function fetchFederalGrantDetail(rawId: string): Promise<Grant | nu
     | undefined;
   if (!data || !syn) return null;
 
-  const stripTags = (html?: string) =>
-    (html ?? "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/g, " ")
-      .replace(/&amp;/g, "&")
-      .replace(/\s+/g, " ")
-      .trim();
+  const stripTags = (html?: string) => decodeEntities((html ?? "").replace(/<[^>]+>/g, " "));
 
   const num = (v?: string) => {
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? n : undefined;
   };
 
-  const title = data.opportunityTitle ?? "Federal grant opportunity";
+  const title = decodeEntities(data.opportunityTitle ?? "Federal grant opportunity");
 
   return {
     id: `fed-${numericId}`,
     source: "federal",
     title,
-    agency: syn.agencyName ?? "Federal agency",
+    agency:
+      syn.agencyDetails?.agencyName ??
+      syn.topAgencyDetails?.agencyName ??
+      "Federal agency",
+
     number: data.opportunityNumber,
     category: categorize(`${title} ${stripTags(syn.synopsisDesc).slice(0, 400)}`),
     openDate: parseLooseDate(syn.postingDate),
