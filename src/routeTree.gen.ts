@@ -9,10 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as DraftsRouteImport } from './routes/drafts'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GrantsIdIndexRouteImport } from './routes/grants.$id.index'
 import { Route as GrantsIdDraftRouteImport } from './routes/grants.$id.draft'
 
+const DraftsRoute = DraftsRouteImport.update({
+  id: '/drafts',
+  path: '/drafts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -31,36 +37,47 @@ const GrantsIdDraftRoute = GrantsIdDraftRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/drafts': typeof DraftsRoute
   '/grants/$id/draft': typeof GrantsIdDraftRoute
   '/grants/$id/': typeof GrantsIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/drafts': typeof DraftsRoute
   '/grants/$id/draft': typeof GrantsIdDraftRoute
   '/grants/$id': typeof GrantsIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/drafts': typeof DraftsRoute
   '/grants/$id/draft': typeof GrantsIdDraftRoute
   '/grants/$id/': typeof GrantsIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/grants/$id/draft' | '/grants/$id/'
+  fullPaths: '/' | '/drafts' | '/grants/$id/draft' | '/grants/$id/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/grants/$id/draft' | '/grants/$id'
-  id: '__root__' | '/' | '/grants/$id/draft' | '/grants/$id/'
+  to: '/' | '/drafts' | '/grants/$id/draft' | '/grants/$id'
+  id: '__root__' | '/' | '/drafts' | '/grants/$id/draft' | '/grants/$id/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DraftsRoute: typeof DraftsRoute
   GrantsIdDraftRoute: typeof GrantsIdDraftRoute
   GrantsIdIndexRoute: typeof GrantsIdIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/drafts': {
+      id: '/drafts'
+      path: '/drafts'
+      fullPath: '/drafts'
+      preLoaderRoute: typeof DraftsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DraftsRoute: DraftsRoute,
   GrantsIdDraftRoute: GrantsIdDraftRoute,
   GrantsIdIndexRoute: GrantsIdIndexRoute,
 }
