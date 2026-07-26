@@ -9,7 +9,7 @@ import { CATEGORY_LABELS } from "@/lib/grants/types";
 import { awardRange, deadlineLabel, formatDate, matchLabel, urgencyOf } from "@/lib/grant-display";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/grants/$id")({
+export const Route = createFileRoute("/grants/$id/")({
   head: () => ({
     meta: [
       { title: "Grant details | Texas Municipal Grant Finder" },
@@ -28,7 +28,7 @@ export const Route = createFileRoute("/grants/$id")({
 });
 
 function GrantDetail() {
-  const { id } = useParams({ from: "/grants/$id" });
+  const { id } = useParams({ from: "/grants/$id/" });
 
   const grantQuery = useQuery({
     queryKey: ["grant", id],
