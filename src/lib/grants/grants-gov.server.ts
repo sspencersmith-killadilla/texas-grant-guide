@@ -4,6 +4,32 @@ const SEARCH_URL = "https://api.grants.gov/v1/api/search2";
 const FETCH_URL = "https://api.grants.gov/v1/api/fetchOpportunity";
 const CITY_ELIGIBILITY = "02"; // City or township governments
 
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: " ",
+  amp: "&",
+  quot: '"',
+  apos: "'",
+  lsquo: "\u2018",
+  rsquo: "\u2019",
+  ldquo: "\u201C",
+  rdquo: "\u201D",
+  ndash: "\u2013",
+  mdash: "\u2014",
+  bull: "\u2022",
+  hellip: "\u2026",
+  lt: "<",
+  gt: ">",
+};
+
+export function decodeEntities(input: string): string {
+  return input
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/&([a-z]+);/gi, (match, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? match)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function categorize(text: string): GrantCategory {
   const t = text.toLowerCase();
   const rules: [GrantCategory, string[]][] = [
