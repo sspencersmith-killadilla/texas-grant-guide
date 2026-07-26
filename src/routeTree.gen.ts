@@ -10,43 +10,43 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as GrantsIdRouteImport } from './routes/grants.$id'
+import { Route as GrantsIdIndexRouteImport } from './routes/grants.$id.index'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const GrantsIdRoute = GrantsIdRouteImport.update({
-  id: '/grants/$id',
-  path: '/grants/$id',
+const GrantsIdIndexRoute = GrantsIdIndexRouteImport.update({
+  id: '/grants/$id/',
+  path: '/grants/$id/',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/grants/$id': typeof GrantsIdRoute
+  '/grants/$id/': typeof GrantsIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/grants/$id': typeof GrantsIdRoute
+  '/grants/$id': typeof GrantsIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/grants/$id': typeof GrantsIdRoute
+  '/grants/$id/': typeof GrantsIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/grants/$id'
+  fullPaths: '/' | '/grants/$id/'
   fileRoutesByTo: FileRoutesByTo
   to: '/' | '/grants/$id'
-  id: '__root__' | '/' | '/grants/$id'
+  id: '__root__' | '/' | '/grants/$id/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  GrantsIdRoute: typeof GrantsIdRoute
+  GrantsIdIndexRoute: typeof GrantsIdIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -58,11 +58,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/grants/$id': {
-      id: '/grants/$id'
+    '/grants/$id/': {
+      id: '/grants/$id/'
       path: '/grants/$id'
-      fullPath: '/grants/$id'
-      preLoaderRoute: typeof GrantsIdRouteImport
+      fullPath: '/grants/$id/'
+      preLoaderRoute: typeof GrantsIdIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -70,7 +70,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  GrantsIdRoute: GrantsIdRoute,
+  GrantsIdIndexRoute: GrantsIdIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
