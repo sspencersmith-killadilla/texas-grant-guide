@@ -92,8 +92,8 @@ export async function fetchFederalGrants(): Promise<Grant[]> {
   return hits.map((hit) => ({
     id: `fed-${hit.id}`,
     source: "federal" as const,
-    title: hit.title,
-    agency: hit.agency,
+    title: decodeEntities(hit.title),
+    agency: decodeEntities(hit.agency),
     number: hit.number,
     category: categorize(`${hit.title} ${hit.agency}`),
     openDate: parseMmDdYyyy(hit.openDate),
