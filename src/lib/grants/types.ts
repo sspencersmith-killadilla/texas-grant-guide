@@ -10,6 +10,8 @@ export const CATEGORIES = [
   "emergency",
   "energy",
   "community",
+  "culture",
+  "tourism",
   "other",
 ] as const;
 
@@ -25,8 +27,11 @@ export const CATEGORY_LABELS: Record<GrantCategory, string> = {
   emergency: "Emergency Management",
   energy: "Energy & Air Quality",
   community: "Community Development",
+  culture: "Libraries, Arts & Museums",
+  tourism: "Tourism & Travel",
   other: "Other",
 };
+
 
 export interface Grant {
   id: string;
