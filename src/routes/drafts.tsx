@@ -5,7 +5,7 @@ import { Download, ExternalLink, FileText, Trash2 } from "lucide-react";
 import { SiteHeader } from "@/components/SiteHeader";
 import { Button } from "@/components/ui/button";
 import { downloadDocx, downloadPdf } from "@/lib/export";
-import { deleteDraft, listDrafts, type SavedDraft } from "@/lib/local-drafts";
+import { deleteDraft, loadDrafts, type SavedDraft } from "@/lib/local-drafts";
 import { formatDate } from "@/lib/grant-display";
 
 export const Route = createFileRoute("/drafts")({
@@ -31,13 +31,13 @@ function DraftsPage() {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setDrafts(listDrafts());
+    setDrafts(loadDrafts());
     setHydrated(true);
   }, []);
 
   const remove = (id: string) => {
     deleteDraft(id);
-    setDrafts(listDrafts());
+    setDrafts(loadDrafts());
   };
 
   return (
