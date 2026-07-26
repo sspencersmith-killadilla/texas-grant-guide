@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GrantsIdIndexRouteImport } from './routes/grants.$id.index'
+import { Route as GrantsIdDraftRouteImport } from './routes/grants.$id.draft'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,30 +23,39 @@ const GrantsIdIndexRoute = GrantsIdIndexRouteImport.update({
   path: '/grants/$id/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GrantsIdDraftRoute = GrantsIdDraftRouteImport.update({
+  id: '/grants/$id/draft',
+  path: '/grants/$id/draft',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/grants/$id/draft': typeof GrantsIdDraftRoute
   '/grants/$id/': typeof GrantsIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/grants/$id/draft': typeof GrantsIdDraftRoute
   '/grants/$id': typeof GrantsIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/grants/$id/draft': typeof GrantsIdDraftRoute
   '/grants/$id/': typeof GrantsIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/grants/$id/'
+  fullPaths: '/' | '/grants/$id/draft' | '/grants/$id/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/grants/$id'
-  id: '__root__' | '/' | '/grants/$id/'
+  to: '/' | '/grants/$id/draft' | '/grants/$id'
+  id: '__root__' | '/' | '/grants/$id/draft' | '/grants/$id/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  GrantsIdDraftRoute: typeof GrantsIdDraftRoute
   GrantsIdIndexRoute: typeof GrantsIdIndexRoute
 }
 
@@ -65,11 +75,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GrantsIdIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/grants/$id/draft': {
+      id: '/grants/$id/draft'
+      path: '/grants/$id/draft'
+      fullPath: '/grants/$id/draft'
+      preLoaderRoute: typeof GrantsIdDraftRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  GrantsIdDraftRoute: GrantsIdDraftRoute,
   GrantsIdIndexRoute: GrantsIdIndexRoute,
 }
 export const routeTree = rootRouteImport
