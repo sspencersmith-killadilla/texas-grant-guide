@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { FileText, Landmark } from "lucide-react";
+import { Building2, FileText, Landmark } from "lucide-react";
 
 export function SiteHeader() {
   return (
@@ -23,6 +23,13 @@ export function SiteHeader() {
             activeOptions={{ exact: true }}
           >
             Find grants
+          </Link>
+          <Link
+            to="/profile"
+            className="flex items-center gap-1.5 rounded-sm px-3 py-2 font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground [&.active]:text-foreground"
+          >
+            <Building2 className="size-4" />
+            My city
           </Link>
           <Link
             to="/drafts"

@@ -72,7 +72,9 @@ function DraftsPage() {
                     <p className="mt-1 text-xs text-muted-foreground">
                       {draft.grantAgency} · updated {formatDate(draft.updatedAt)} ·{" "}
                       {draft.sections.length > 0 ? `${draft.sections.length} sections written` : "answers only"}
+                      {draft.scorecard ? ` · scored ${draft.scorecard.overall}/100` : ""}
                     </p>
+
                   </div>
                   <a
                     href={draft.grantUrl}

@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { AlertTriangle, Loader2, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Building2, Loader2, Search, Sparkles } from "lucide-react";
 
 import { SiteHeader } from "@/components/SiteHeader";
 import { GrantCard } from "@/components/GrantCard";
@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { listGrants } from "@/lib/grants.functions";
 import { CATEGORIES, CATEGORY_LABELS, type GrantCategory } from "@/lib/grants/types";
 import { daysUntil, formatDate } from "@/lib/grant-display";
+import { scoreGrant, type FitResult } from "@/lib/grants/fit";
+import { hasUsableProfile, loadProfile, markVisit, readLastVisit, type CityProfile } from "@/lib/city-profile";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
@@ -19,13 +21,15 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Search state of Texas and federal grants open to municipalities, read plain-English summaries and deadlines, and build a first-draft application.",
+          "Search state of Texas and federal grants open to municipalities, see which ones actually fit your city, and build a first-draft application.",
       },
       { property: "og:title", content: "Texas Municipal Grant Finder" },
       {
         property: "og:description",
-        content: "Grants Texas cities can apply for, explained in plain English, with a first-draft application generator.",
+        content: "Grants Texas cities can apply for, scored for fit and explained in plain English.",
       },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
   component: Index,
@@ -33,6 +37,7 @@ export const Route = createFileRoute("/")({
 
 type SourceFilter = "all" | "federal" | "texas";
 type DeadlineFilter = "all" | "30" | "60" | "90";
+type ViewFilter = "all" | "fits" | "new" | "forecasted";
 
 function Index() {
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
@@ -45,41 +50,77 @@ function Index() {
   const [source, setSource] = useState<SourceFilter>("all");
   const [category, setCategory] = useState<GrantCategory | "all">("all");
   const [deadline, setDeadline] = useState<DeadlineFilter>("all");
+  const [view, setView] = useState<ViewFilter>("all");
+  const [profile, setProfile] = useState<CityProfile | null>(null);
+  const [lastVisit, setLastVisit] = useState<string | null>(null);
 
+  useEffect(() => {
+    const saved = loadProfile();
+    setProfile(saved);
+    setLastVisit(readLastVisit());
+    markVisit();
+    if (saved && hasUsableProfile(saved)) setView("fits");
+
+    const onChange = () => setProfile(loadProfile());
+    window.addEventListener("muni-profile-changed", onChange);
+    return () => window.removeEventListener("muni-profile-changed", onChange);
+  }, []);
+
+  const usableProfile = hasUsableProfile(profile) ? profile : null;
   const grants = data?.grants ?? [];
+
+  const scored = useMemo(
+    () =>
+      grants.map((grant) => ({
+        grant,
+        fit: usableProfile ? scoreGrant(grant, usableProfile) : (null as FitResult | null),
+      })),
+    [grants, usableProfile],
+  );
+
+  const isNew = (iso?: string) => Boolean(lastVisit && iso && new Date(iso).getTime() > new Date(lastVisit).getTime());
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return grants
-      .filter((g) => (source === "all" ? true : g.source === source))
-      .filter((g) => (category === "all" ? true : g.category === category))
-      .filter((g) => {
+    return scored
+      .filter(({ grant }) => (source === "all" ? true : grant.source === source))
+      .filter(({ grant }) => (category === "all" ? true : grant.category === category))
+      .filter(({ grant }) => {
         if (deadline === "all") return true;
-        const days = daysUntil(g.closeDate);
-        if (days === null) return false;
-        return days >= 0 && days <= Number(deadline);
+        const days = daysUntil(grant.closeDate);
+        return days !== null && days >= 0 && days <= Number(deadline);
       })
-      .filter((g) => {
-        const days = daysUntil(g.closeDate);
+      .filter(({ grant }) => {
+        const days = daysUntil(grant.closeDate);
         return days === null || days >= 0;
       })
-      .filter((g) => !q || `${g.title} ${g.agency} ${g.number ?? ""}`.toLowerCase().includes(q))
+      .filter(({ grant, fit }) => {
+        if (view === "fits") return !fit || fit.level === "strong" || fit.level === "possible";
+        if (view === "new") return isNew(grant.openDate) || isNew(grant.lastChecked);
+        if (view === "forecasted") return grant.status === "forecasted";
+        return true;
+      })
+      .filter(({ grant }) => !q || `${grant.title} ${grant.agency} ${grant.number ?? ""}`.toLowerCase().includes(q))
       .sort((a, b) => {
-        const da = daysUntil(a.closeDate);
-        const db = daysUntil(b.closeDate);
-        if (da === null && db === null) return a.title.localeCompare(b.title);
+        if (a.fit && b.fit && a.fit.score !== b.fit.score) return b.fit.score - a.fit.score;
+        const da = daysUntil(a.grant.closeDate);
+        const db = daysUntil(b.grant.closeDate);
+        if (da === null && db === null) return a.grant.title.localeCompare(b.grant.title);
         if (da === null) return 1;
         if (db === null) return -1;
         return da - db;
       });
-  }, [grants, search, source, category, deadline]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scored, search, source, category, deadline, view, lastVisit]);
 
   const counts = useMemo(
     () => ({
       texas: grants.filter((g) => g.source === "texas").length,
       federal: grants.filter((g) => g.source === "federal").length,
+      forecasted: grants.filter((g) => g.status === "forecasted").length,
+      strong: scored.filter((s) => s.fit?.level === "strong").length,
     }),
-    [grants],
+    [grants, scored],
   );
 
   return (
@@ -93,9 +134,9 @@ function Index() {
             Grant money your city qualifies for, explained without the jargon.
           </h1>
           <p className="mt-4 max-w-2xl text-base text-muted-foreground">
-            Search {counts.federal + counts.texas || "hundreds of"} open federal and state of Texas programs where
-            municipalities are eligible applicants. Read a plain-English summary and timeline, then answer eight
-            questions to generate a first-draft application you can download as Word or PDF.
+            Search {counts.federal + counts.texas || "hundreds of"} open and forecasted federal and state of Texas
+            programs where municipalities are eligible applicants. Tell us about your city once and every listing gets
+            scored for fit, then answer the questions the program actually scores to generate a downloadable first draft.
           </p>
           <div className="mt-7 flex flex-wrap items-center gap-3">
             <div className="relative w-full max-w-md">
@@ -113,6 +154,29 @@ function Index() {
               Refresh listings
             </Button>
           </div>
+
+          {usableProfile ? (
+            <p className="mt-5 flex flex-wrap items-center gap-2 text-sm">
+              <Sparkles className="size-4 text-accent" />
+              Scoring for <strong>{usableProfile.cityName}</strong> — {counts.strong} strong fit
+              {counts.strong === 1 ? "" : "s"} right now.
+              <Link to="/profile" className="underline text-muted-foreground">
+                Edit profile
+              </Link>
+            </p>
+          ) : (
+            <div className="mt-5 flex flex-wrap items-center gap-3 border border-accent/40 bg-card p-4">
+              <Building2 className="size-4 text-accent" />
+              <p className="text-sm">
+                <strong>Don't miss a grant you qualify for.</strong> Add your population, services and match capacity —
+                it stays in this browser — and every listing gets a fit score with eligibility warnings.
+              </p>
+              <Button asChild size="sm" className="ml-auto rounded-sm bg-accent text-accent-foreground hover:bg-accent/90">
+                <Link to="/profile">Set up my city</Link>
+              </Button>
+            </div>
+          )}
+
           {data?.federalError ? (
             <p className="mt-4 flex items-center gap-2 text-sm text-urgent">
               <AlertTriangle className="size-4" /> Federal listings could not be refreshed right now ({data.federalError}).
@@ -125,6 +189,21 @@ function Index() {
       <main className="mx-auto max-w-6xl px-4 py-10">
         <div className="grid gap-8 lg:grid-cols-[220px_1fr]">
           <aside className="space-y-6">
+            <FilterGroup label="View">
+              <FilterChip active={view === "all"} onClick={() => setView("all")}>
+                Everything
+              </FilterChip>
+              <FilterChip active={view === "fits"} onClick={() => setView("fits")}>
+                {usableProfile ? `Fits my city (${counts.strong} strong)` : "Fits my city"}
+              </FilterChip>
+              <FilterChip active={view === "new"} onClick={() => setView("new")}>
+                New since last visit
+              </FilterChip>
+              <FilterChip active={view === "forecasted"} onClick={() => setView("forecasted")}>
+                Forecasted ({counts.forecasted})
+              </FilterChip>
+            </FilterGroup>
+
             <FilterGroup label="Source">
               <FilterChip active={source === "all"} onClick={() => setSource("all")}>
                 All sources
@@ -167,10 +246,10 @@ function Index() {
           <div>
             <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2 border-b border-border pb-3">
               <h2 className="text-lg font-semibold">
-                {isLoading ? "Loading grants…" : `${filtered.length} open opportunit${filtered.length === 1 ? "y" : "ies"}`}
+                {isLoading ? "Loading grants…" : `${filtered.length} opportunit${filtered.length === 1 ? "y" : "ies"}`}
               </h2>
               <p className="text-xs text-muted-foreground">
-                Federal data from Grants.gov · last checked {formatDate(new Date().toISOString())}
+                Federal data from Grants.gov · last checked {formatDate(data?.syncedAt ?? new Date().toISOString())}
               </p>
             </div>
 
@@ -182,26 +261,31 @@ function Index() {
               </div>
             ) : isError ? (
               <p className="border border-urgent/40 bg-card p-6 text-sm">
-                Something went wrong loading grants. <button className="underline" onClick={() => refetch()}>Try again</button>.
+                Something went wrong loading grants.{" "}
+                <button className="underline" onClick={() => refetch()}>
+                  Try again
+                </button>
+                .
               </p>
             ) : filtered.length === 0 ? (
               <div className="border border-border bg-card p-10 text-center">
                 <p className="font-semibold">No grants match those filters.</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Try widening the deadline window or clearing the category filter.
+                  Try switching the view to Everything, widening the deadline window or clearing the category filter.
                 </p>
               </div>
             ) : (
               <div className="grid gap-3">
-                {filtered.map((grant) => (
-                  <GrantCard key={grant.id} grant={grant} />
+                {filtered.map(({ grant, fit }) => (
+                  <GrantCard key={grant.id} grant={grant} fit={fit} />
                 ))}
               </div>
             )}
 
             <p className="mt-8 border-t border-border pt-4 text-xs text-muted-foreground">
-              Always confirm eligibility, deadlines and match requirements on the official program page before applying.
-              Drafts you create are stored only in this browser — see{" "}
+              Fit scores are a screening aid, not a legal eligibility determination. Always confirm eligibility,
+              deadlines and match requirements on the official program page before applying. Drafts you create are
+              stored only in this browser — see{" "}
               <Link to="/drafts" className="underline">
                 My drafts
               </Link>
