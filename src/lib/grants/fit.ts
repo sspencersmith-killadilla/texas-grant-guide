@@ -130,6 +130,33 @@ export function scoreGrant(grant: Grant, profile: CityProfile | null): FitResult
     reasons.push(`The program text references ${hitDesignations.map((d) => d.label.toLowerCase()).join(" and ")}, which describes your city`);
   }
 
+  // --- verified HUD low/mod and Opportunity Zone data ---
+  const hud = profile.hudFindings;
+  if (hud) {
+    const mentionsLowMod = /low[- ]?(?:and )?moderate|low[- ]income|lmi|disadvantaged|distressed|underserved/i.test(
+      haystack,
+    );
+    const mentionsOz = /opportunity zone/i.test(haystack);
+    if (mentionsLowMod && hud.meetsCdbgThreshold) {
+      score += 12;
+      reasons.push(
+        `HUD data shows ${hud.lowModPct.toFixed(1)}% of your residents are low- or moderate-income, above the 51% threshold this program references`,
+      );
+    } else if (mentionsLowMod) {
+      reasons.push(
+        `This program weights low- and moderate-income need; HUD puts your city at ${hud.lowModPct.toFixed(1)}%`,
+      );
+    }
+    if (mentionsOz && hud.opportunityZoneTracts.length > 0) {
+      score += 10;
+      reasons.push(
+        `Your city contains ${hud.opportunityZoneTracts.length} designated Opportunity Zone tract${hud.opportunityZoneTracts.length === 1 ? "" : "s"}, which this program references`,
+      );
+    }
+  }
+
+
+
   // --- match / cost share affordability ---
   const capacity = profile.matchCapacity ? MATCH_CAPACITY_AMOUNT[profile.matchCapacity] : null;
   if (grant.costSharing === false || /no (?:cost share|match) (?:is )?required|match is waived/i.test(eligibilityText)) {

@@ -4,19 +4,24 @@ import {
   checklistSchema,
   draftSchema,
   extraQuestionsSchema,
+  hudLocationSchema,
+  hudPlaceSchema,
+  requirementsSchema,
   reviewSchema,
   reviseSchema,
   summarySchema,
   type ChecklistItem,
   type DraftSection,
   type ExtraQuestion,
+  type Requirement,
   type Scorecard,
 } from "./grants/schemas";
 import { z } from "zod";
 import type { Grant, PlainSummary } from "./grants/types";
 import type { GrantListing } from "./grants/registry.server";
+import type { HudPlaceFinding, HudTractFinding } from "./hud";
 
-export type { DraftSection, ExtraQuestion, ChecklistItem, Scorecard };
+export type { DraftSection, ExtraQuestion, ChecklistItem, Scorecard, Requirement };
 
 export const listGrants = createServerFn({ method: "GET" }).handler(async (): Promise<GrantListing> => {
   const { loadAllGrants } = await import("./grants/registry.server");
@@ -42,6 +47,13 @@ export const generateGrantQuestions = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<{ questions: ExtraQuestion[] }> => {
     const { buildExtraQuestions } = await import("./grants/drafting.server");
     return { questions: await buildExtraQuestions(data) };
+  });
+
+export const extractRequirements = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => requirementsSchema.parse(data))
+  .handler(async ({ data }): Promise<{ requirements: Requirement[] }> => {
+    const { buildRequirements } = await import("./grants/drafting.server");
+    return { requirements: await buildRequirements(data) };
   });
 
 export const generateDraft = createServerFn({ method: "POST" })
@@ -70,4 +82,18 @@ export const extractChecklist = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<{ items: ChecklistItem[] }> => {
     const { buildChecklist } = await import("./grants/drafting.server");
     return { items: await buildChecklist(data) };
+  });
+
+export const hudLookupCity = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => hudPlaceSchema.parse(data))
+  .handler(async ({ data }): Promise<HudPlaceFinding> => {
+    const { lookupPlace } = await import("./grants/hud.server");
+    return lookupPlace(data.city, data.state ?? "TX");
+  });
+
+export const hudLookupLocation = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => hudLocationSchema.parse(data))
+  .handler(async ({ data }): Promise<HudTractFinding> => {
+    const { lookupLocation } = await import("./grants/hud.server");
+    return lookupLocation(data.location);
   });
