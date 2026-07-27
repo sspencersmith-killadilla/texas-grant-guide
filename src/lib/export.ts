@@ -1,4 +1,7 @@
-import { findPlaceholders, type SavedDraft } from "./local-drafts";
+import { findPlaceholders, DOCUMENT_STATUS_LABELS, type SavedDraft } from "./local-drafts";
+import { coverageStats, evaluateCoverage, COVERAGE_LABELS } from "./grants/evidence";
+import { citationSentence, HUD_SOURCE_NOTE } from "./hud";
+import { DRAFT_QUESTIONS } from "./questions";
 
 function fileBase(draft: SavedDraft) {
   return draft.grantTitle
@@ -19,6 +22,37 @@ function paragraphs(body: string) {
 function appendixLines(draft: SavedDraft): { heading: string; items: string[] }[] {
   const blocks: { heading: string; items: string[] }[] = [];
 
+  if (draft.requirements.length > 0) {
+    const questions = [
+      ...DRAFT_QUESTIONS.map((q) => ({ id: q.id, label: q.label })),
+      ...draft.extraQuestions.map((q) => ({ id: q.id, label: q.label })),
+    ];
+    const coverage = evaluateCoverage({
+      requirements: draft.requirements,
+      questions,
+      answers: draft.answers,
+      manualEvidence: draft.manualEvidence,
+      hudFindings: draft.hudFindings,
+      checklist: draft.checklist,
+    });
+    const stats = coverageStats(coverage);
+    blocks.push({
+      heading: `Requirement coverage (${stats.covered} of ${stats.total} covered)`,
+      items: coverage.flatMap((c) => [
+        `${COVERAGE_LABELS[c.status].toUpperCase()}${c.requirement.blocking ? " (make or break)" : ""} — ${c.requirement.label}`,
+        `    Evidence: ${c.evidence.length ? c.evidence.map((e) => e.label).join("; ") : "none yet"}`,
+        ...(c.documents.length ? [`    Documents: ${c.documents.join("; ")}`] : []),
+      ]),
+    });
+  }
+
+  if (draft.hudFindings.length > 0) {
+    blocks.push({
+      heading: "HUD low-income and Opportunity Zone findings",
+      items: [...draft.hudFindings.map((f) => citationSentence(f)), `Source: ${HUD_SOURCE_NOTE}`],
+    });
+  }
+
   const placeholders = findPlaceholders(draft.sections);
   if (placeholders.length > 0) {
     blocks.push({
@@ -29,8 +63,12 @@ function appendixLines(draft: SavedDraft): { heading: string; items: string[] }[
 
   if (draft.checklist.length > 0) {
     blocks.push({
-      heading: "Documents and registrations to gather",
-      items: draft.checklist.map((c) => `${c.done ? "[x]" : "[ ]"} ${c.label}${c.detail ? ` — ${c.detail}` : ""}`),
+      heading: "Document request packet",
+      items: draft.checklist.flatMap((c) => [
+        `${c.done ? "[x]" : "[ ]"} ${c.documentName || c.label}${c.required === false ? " (if applicable)" : ""}`,
+        `    Status: ${DOCUMENT_STATUS_LABELS[c.status]}${c.source ? ` · From: ${c.source}` : ""}${c.format ? ` · Format: ${c.format}` : ""}${c.location ? ` · Location: ${c.location}` : ""}`,
+        ...(c.detail ? [`    ${c.detail}`] : []),
+      ]),
     });
   }
 
@@ -48,6 +86,7 @@ function appendixLines(draft: SavedDraft): { heading: string; items: string[] }[
 
   return blocks;
 }
+
 
 
 export async function downloadDocx(draft: SavedDraft) {

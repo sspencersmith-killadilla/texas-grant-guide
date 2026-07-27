@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useParams, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -11,6 +11,7 @@ import {
   FileText,
   Gauge,
   Loader2,
+  MapPin,
   RefreshCw,
   Sparkles,
   Wand2,
@@ -25,25 +26,33 @@ import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   extractChecklist,
+  extractRequirements,
   generateDraft,
   generateGrantQuestions,
   getGrant,
+  hudLookupLocation,
   reviewDraft,
   reviseSection,
 } from "@/lib/grants.functions";
-import type { ExtraQuestion, Scorecard } from "@/lib/grants/schemas";
+import type { ExtraQuestion, Requirement, Scorecard } from "@/lib/grants/schemas";
+import { coverageStats, evaluateCoverage, COVERAGE_LABELS, type Coverage } from "@/lib/grants/evidence";
+import { citationSentence, findingHeadline, HUD_SOURCE_NOTE, type HudTractFinding } from "@/lib/hud";
 import { DRAFT_QUESTIONS } from "@/lib/questions";
 import { downloadDocx, downloadPdf } from "@/lib/export";
 import {
+  DOCUMENT_STATUS_LABELS,
   findPlaceholders,
   getDraftForGrant,
   newDraftId,
+  normalizeChecklistItem,
   saveDraft,
+  type DocumentStatus,
   type SavedChecklistItem,
   type SavedDraft,
 } from "@/lib/local-drafts";
 import { hasUsableProfile, loadProfile, profileSummaryText, type CityProfile } from "@/lib/city-profile";
 import { cn } from "@/lib/utils";
+
 
 export const Route = createFileRoute("/grants/$id/draft")({
   head: () => ({
@@ -85,11 +94,18 @@ function DraftWizard() {
   const [sections, setSections] = useState<SavedDraft["sections"]>([]);
   const [checklist, setChecklist] = useState<SavedChecklistItem[]>([]);
   const [scorecard, setScorecard] = useState<Scorecard | null>(null);
+  const [requirements, setRequirements] = useState<Requirement[]>([]);
+  const [manualEvidence, setManualEvidence] = useState<Record<string, string>>({});
+  const [hudFindings, setHudFindings] = useState<HudTractFinding[]>([]);
+  const [hudInput, setHudInput] = useState("");
+  const [hudLoading, setHudLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [revisingIndex, setRevisingIndex] = useState<number | null>(null);
   const [revisionText, setRevisionText] = useState<Record<number, string>>({});
   const [hydrated, setHydrated] = useState(false);
+  const persistRef = useRef<(next?: Partial<SavedDraft>) => void>(() => {});
+
 
   const profileText = profile && hasUsableProfile(profile) ? profileSummaryText(profile) : undefined;
 
@@ -105,7 +121,11 @@ function DraftWizard() {
       setSections(existing.sections);
       setChecklist(existing.checklist);
       setScorecard(existing.scorecard);
+      setRequirements(existing.requirements);
+      setManualEvidence(existing.manualEvidence);
+      setHudFindings(existing.hudFindings);
       if (existing.sections.length > 0) setStep(-1);
+
     } else {
       setDraftId(newDraftId());
       if (saved && hasUsableProfile(saved)) {
@@ -144,9 +164,44 @@ function DraftWizard() {
     }
   }, [questionsQuery.data, extraQuestions.length]);
 
+  const allQuestions = useMemo(
+    () => [...DRAFT_QUESTIONS.map((q) => ({ ...q, source: "core" as const })), ...extraQuestions.map((q) => ({ ...q, multiline: true, source: "program" as const }))],
+    [extraQuestions],
+  );
+
+  // What the notice actually requires, so each answer can be mapped to a criterion.
+  const requirementsQuery = useQuery({
+    queryKey: ["grant-requirements", id, allQuestions.length],
+    enabled: Boolean(grant?.description) && hydrated && requirements.length === 0 && extraQuestions.length > 0,
+    staleTime: Infinity,
+    retry: false,
+    queryFn: () =>
+      extractRequirements({
+        data: {
+          grantTitle: grant!.title,
+          grantAgency: grant!.agency,
+          grantDescription: grant!.description || grant!.title,
+          grantEligibility: grant!.eligibility,
+          questions: allQuestions.map((q) => ({ id: q.id, label: q.label })),
+        },
+      }),
+  });
+
+  useEffect(() => {
+    if (requirementsQuery.data?.requirements?.length && requirements.length === 0) {
+      setRequirements(requirementsQuery.data.requirements);
+      persistRef.current({ requirements: requirementsQuery.data.requirements });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requirementsQuery.data, requirements.length]);
+
   const checklistQuery = useQuery({
-    queryKey: ["grant-checklist", id],
-    enabled: Boolean(grant?.description) && hydrated && checklist.length === 0,
+    queryKey: ["grant-checklist", id, requirements.length],
+    enabled:
+      Boolean(grant?.description) &&
+      hydrated &&
+      checklist.length === 0 &&
+      (requirements.length > 0 || requirementsQuery.isError),
     staleTime: Infinity,
     retry: false,
     queryFn: () =>
@@ -156,20 +211,34 @@ function DraftWizard() {
           grantAgency: grant!.agency,
           grantDescription: grant!.description || grant!.title,
           grantEligibility: grant!.eligibility,
+          closeDate: grant!.closeDate,
+          requirements: requirements.map((r) => ({ id: r.id, label: r.label })),
         },
       }),
   });
 
   useEffect(() => {
     if (checklistQuery.data?.items?.length && checklist.length === 0) {
-      setChecklist(checklistQuery.data.items.map((i) => ({ ...i, done: false })));
+      const next = checklistQuery.data.items.map((i) => normalizeChecklistItem(i));
+      setChecklist(next);
+      persistRef.current({ checklist: next });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checklistQuery.data, checklist.length]);
 
-  const allQuestions = useMemo(
-    () => [...DRAFT_QUESTIONS.map((q) => ({ ...q, source: "core" as const })), ...extraQuestions.map((q) => ({ ...q, multiline: true, source: "program" as const }))],
-    [extraQuestions],
+  const coverage = useMemo(
+    () =>
+      evaluateCoverage({
+        requirements,
+        questions: allQuestions.map((q) => ({ id: q.id, label: q.label })),
+        answers,
+        manualEvidence,
+        hudFindings,
+        checklist,
+      }),
+    [requirements, allQuestions, answers, manualEvidence, hudFindings, checklist],
   );
+  const stats = useMemo(() => coverageStats(coverage), [coverage]);
 
   const buildDraftRecord = (next?: Partial<SavedDraft>): SavedDraft | null => {
     if (!grant || !draftId) return null;
@@ -181,6 +250,9 @@ function DraftWizard() {
       grantUrl: grant.url,
       answers,
       extraQuestions,
+      requirements,
+      manualEvidence,
+      hudFindings,
       sections,
       checklist,
       scorecard,
@@ -191,10 +263,13 @@ function DraftWizard() {
     };
   };
 
+
   const persist = (next?: Partial<SavedDraft>) => {
     const record = buildDraftRecord(next);
     if (record) saveDraft(record);
   };
+  persistRef.current = persist;
+
 
   const answered = useMemo(
     () => allQuestions.filter((q) => (answers[q.id] ?? "").trim().length > 0).length,
@@ -204,6 +279,41 @@ function DraftWizard() {
   const onReview = step < 0 || step >= allQuestions.length;
   const question = allQuestions[Math.min(Math.max(step, 0), allQuestions.length - 1)];
   const placeholders = useMemo(() => findPlaceholders(sections), [sections]);
+
+  const hudNote = useMemo(() => {
+    const lines = [
+      ...(profile?.hudFindings ? [citationSentence(profile.hudFindings)] : []),
+      ...hudFindings.map((f) => citationSentence(f)),
+    ];
+    return lines.length ? `${lines.join(" ")} Source: ${HUD_SOURCE_NOTE}` : undefined;
+  }, [profile, hudFindings]);
+
+  const handleHudLookup = async () => {
+    const location = hudInput.trim();
+    if (location.length < 3) {
+      toast.error("Enter a project address, intersection or census tract.");
+      return;
+    }
+    setHudLoading(true);
+    try {
+      const finding = await hudLookupLocation({ data: { location } });
+      const next = [...hudFindings.filter((f) => f.tractGeoid !== finding.tractGeoid), finding];
+      setHudFindings(next);
+      setHudInput("");
+      persist({ hudFindings: next });
+      toast.success("HUD low/mod and Opportunity Zone status checked.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not check that location with HUD.");
+    } finally {
+      setHudLoading(false);
+    }
+  };
+
+  const updateChecklistItem = (index: number, patch: Partial<SavedChecklistItem>) => {
+    const next = checklist.map((c, i) => (i === index ? { ...c, ...patch } : c));
+    setChecklist(next);
+    persist({ checklist: next });
+  };
 
   const handleGenerate = async () => {
     if (!grant) return;
@@ -217,8 +327,11 @@ function DraftWizard() {
           grantEligibility: grant.eligibility,
           cityProfile: profileText,
           answers: allQuestions.map((q) => ({ question: q.label, answer: answers[q.id] ?? "" })),
+          requirements: requirements.map((r) => ({ label: r.label, kind: r.kind, evidenceHint: r.evidenceHint })),
+          hudNote,
         },
       });
+
       setSections(result.sections);
       setStep(-1);
       persist({ sections: result.sections, answers });
@@ -344,6 +457,37 @@ function DraftWizard() {
         ) : null}
       </header>
 
+      {requirementsQuery.isLoading ? (
+        <p className="mt-6 flex items-center gap-2 border border-border bg-card p-5 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Reading this notice's eligibility and scoring requirements…
+        </p>
+      ) : null}
+
+      {requirements.length > 0 ? (
+        <EvidenceMap
+          coverage={coverage}
+          stats={stats}
+          manualEvidence={manualEvidence}
+          onManualEvidence={(requirementId, value) => {
+            const next = { ...manualEvidence, [requirementId]: value };
+            setManualEvidence(next);
+            persist({ manualEvidence: next });
+          }}
+          onJumpToQuestion={(questionId) => {
+            const index = allQuestions.findIndex((q) => q.id === questionId);
+            if (index >= 0) setStep(index);
+          }}
+          hudFindings={hudFindings}
+          hudInput={hudInput}
+          hudLoading={hudLoading}
+          onHudInput={setHudInput}
+          onHudLookup={handleHudLookup}
+          cityFinding={profile?.hudFindings ?? null}
+        />
+      ) : null}
+
+
+
       {!onReview ? (
         <section className="mt-6 border border-border bg-card p-6 sm:p-8">
           {question.source === "program" ? (
@@ -455,30 +599,82 @@ function DraftWizard() {
           {checklist.length > 0 ? (
             <div className="border border-border bg-card p-5">
               <h2 className="flex items-center gap-2 text-sm font-semibold">
-                <ClipboardList className="size-4 text-accent" /> Documents and registrations to gather
+                <ClipboardList className="size-4 text-accent" /> Documents to gather
               </h2>
-              <ul className="mt-3 space-y-2">
+              <p className="mt-1 text-xs text-muted-foreground">
+                Each line is one file. Track who is producing it and where it lives, then export the list for staff.
+              </p>
+              <ul className="mt-4 space-y-4">
                 {checklist.map((item, i) => (
-                  <li key={item.id} className="flex gap-3 border-b border-border pb-2 last:border-0 last:pb-0">
-                    <Checkbox
-                      checked={item.done}
-                      className="mt-0.5 rounded-[2px]"
-                      onCheckedChange={() => {
-                        const next = checklist.map((c, idx) => (idx === i ? { ...c, done: !c.done } : c));
-                        setChecklist(next);
-                        persist({ checklist: next });
-                      }}
-                    />
-                    <div>
-                      <p className={cn("text-sm font-medium", item.done && "text-muted-foreground line-through")}>
-                        {item.label}
-                      </p>
-                      {item.detail ? <p className="text-xs text-muted-foreground">{item.detail}</p> : null}
+                  <li key={item.id} className="border-b border-border pb-4 last:border-0 last:pb-0">
+                    <div className="flex gap-3">
+                      <Checkbox
+                        checked={item.done}
+                        className="mt-0.5 rounded-[2px]"
+                        onCheckedChange={() =>
+                          updateChecklistItem(i, {
+                            done: !item.done,
+                            status: !item.done ? "have-it" : "not-started",
+                          })
+                        }
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className={cn("text-sm font-medium", item.done && "text-muted-foreground line-through")}>
+                          {item.documentName || item.label}
+                          {item.required === false ? (
+                            <span className="ml-2 border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                              If applicable
+                            </span>
+                          ) : null}
+                        </p>
+                        {item.detail ? <p className="mt-0.5 text-xs text-muted-foreground">{item.detail}</p> : null}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {[item.source ? `From: ${item.source}` : "", item.format ? `Format: ${item.format}` : ""]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                        {(item.requirementIds ?? []).length > 0 ? (
+                          <p className="mt-1 text-xs text-accent">
+                            Proves:{" "}
+                            {(item.requirementIds ?? [])
+                              .map((rid) => requirements.find((r) => r.id === rid)?.label)
+                              .filter(Boolean)
+                              .join("; ")}
+                          </p>
+                        ) : null}
+
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <select
+                            value={item.status}
+                            onChange={(e) =>
+                              updateChecklistItem(i, {
+                                status: e.target.value as DocumentStatus,
+                                done: e.target.value === "have-it",
+                              })
+                            }
+                            className="h-8 border border-border bg-background px-2 text-xs"
+                          >
+                            {Object.entries(DOCUMENT_STATUS_LABELS).map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                          <Input
+                            value={item.location}
+                            onChange={(e) => setChecklist(checklist.map((c, idx) => (idx === i ? { ...c, location: e.target.value } : c)))}
+                            onBlur={() => persist({ checklist })}
+                            placeholder="Where it lives: shared drive link, folder, or who has it"
+                            className="h-8 flex-1 rounded-sm text-xs"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </li>
                 ))}
               </ul>
             </div>
+
           ) : null}
 
           {sections.map((section, i) => (
@@ -530,7 +726,160 @@ function DraftWizard() {
   );
 }
 
+const STATUS_STYLES: Record<Coverage["status"], string> = {
+  covered: "border-open/60 text-open",
+  partial: "border-soon/60 text-soon",
+  missing: "border-urgent/60 text-urgent",
+};
+
+function EvidenceMap({
+  coverage,
+  stats,
+  manualEvidence,
+  onManualEvidence,
+  onJumpToQuestion,
+  hudFindings,
+  hudInput,
+  hudLoading,
+  onHudInput,
+  onHudLookup,
+  cityFinding,
+}: {
+  coverage: Coverage[];
+  stats: ReturnType<typeof coverageStats>;
+  manualEvidence: Record<string, string>;
+  onManualEvidence: (requirementId: string, value: string) => void;
+  onJumpToQuestion: (questionId: string) => void;
+  hudFindings: HudTractFinding[];
+  hudInput: string;
+  hudLoading: boolean;
+  onHudInput: (value: string) => void;
+  onHudLookup: () => void;
+  cityFinding: CityProfile["hudFindings"];
+}) {
+  return (
+    <section className="mt-6 border border-border bg-card p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="text-sm font-semibold">Evidence map</h2>
+        <p className="text-xs text-muted-foreground">
+          {stats.covered} covered · {stats.partial} thin · {stats.missing} not addressed
+        </p>
+      </div>
+      <Progress value={stats.percent} className="mt-2 h-1.5" />
+
+      {stats.blockers.length > 0 ? (
+        <p className="mt-3 flex items-start gap-2 border border-urgent/50 p-3 text-xs text-muted-foreground">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-urgent" />
+          <span>
+            {stats.blockers.length} make-or-break requirement{stats.blockers.length === 1 ? " is" : "s are"} not yet
+            evidenced. An application missing these is usually rejected before scoring.
+          </span>
+        </p>
+      ) : null}
+
+      <ul className="mt-4 space-y-4">
+        {coverage.map((c) => (
+          <li key={c.requirement.id} className="border-b border-border pb-4 last:border-0 last:pb-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={cn(
+                  "border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest",
+                  STATUS_STYLES[c.status],
+                )}
+              >
+                {COVERAGE_LABELS[c.status]}
+              </span>
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">{c.requirement.kind}</span>
+              {c.requirement.blocking ? (
+                <span className="text-[10px] uppercase tracking-widest text-urgent">Make or break</span>
+              ) : null}
+            </div>
+            <p className="mt-1.5 text-sm font-medium">{c.requirement.label}</p>
+            {c.requirement.quote ? (
+              <p className="mt-1 border-l-2 border-border pl-2 text-xs italic text-muted-foreground">
+                “{c.requirement.quote}”
+              </p>
+            ) : null}
+            <p className="mt-1 text-xs text-muted-foreground">{c.note}</p>
+
+            {c.evidence.length > 0 ? (
+              <ul className="mt-2 space-y-1.5">
+                {c.evidence.map((e) => (
+                  <li key={e.questionId} className="text-xs">
+                    {e.questionId === "hud" || e.questionId === "manual" ? (
+                      <span className="font-medium">{e.label}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="font-medium underline underline-offset-2"
+                        onClick={() => onJumpToQuestion(e.questionId)}
+                      >
+                        {e.label}
+                      </button>
+                    )}
+                    <span className="text-muted-foreground"> — {e.excerpt}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            {c.documents.length > 0 ? (
+              <p className="mt-2 text-xs text-accent">Documented by: {c.documents.join("; ")}</p>
+            ) : null}
+
+            <Input
+              value={manualEvidence[c.requirement.id] ?? ""}
+              onChange={(e) => onManualEvidence(c.requirement.id, e.target.value)}
+              placeholder={c.requirement.evidenceHint || "Add the evidence that proves this"}
+              className="mt-2 h-8 rounded-sm text-xs"
+            />
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-5 border-t border-border pt-4">
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <MapPin className="size-4 text-accent" /> HUD low-income and Opportunity Zone check
+        </h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Enter the project address or a census tract. We check HUD's low- and moderate-income data and the Qualified
+          Opportunity Zone list, and give you a sentence you can cite.
+        </p>
+        {cityFinding ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Citywide: <span className="font-medium text-foreground">{findingHeadline(cityFinding)}</span>
+          </p>
+        ) : null}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Input
+            value={hudInput}
+            onChange={(e) => onHudInput(e.target.value)}
+            placeholder="1100 Main St, Bastrop, TX"
+            className="h-9 flex-1 rounded-sm text-sm"
+          />
+          <Button variant="outline" className="rounded-sm" onClick={onHudLookup} disabled={hudLoading}>
+            {hudLoading ? <Loader2 className="size-4 animate-spin" /> : <MapPin className="size-4" />}
+            Check location
+          </Button>
+        </div>
+        {hudFindings.length > 0 ? (
+          <ul className="mt-3 space-y-2">
+            {hudFindings.map((f) => (
+              <li key={f.tractGeoid} className="border border-border p-3">
+                <p className="text-xs font-semibold">{f.matchedAddress}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{findingHeadline(f)}</p>
+                <p className="mt-1.5 text-xs text-muted-foreground">{citationSentence(f)}</p>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function ScorecardPanel({ scorecard }: { scorecard: Scorecard }) {
+
   return (
     <div className="border border-border bg-card p-5">
       <div className="flex flex-wrap items-center gap-4">

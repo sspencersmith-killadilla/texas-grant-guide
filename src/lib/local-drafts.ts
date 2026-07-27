@@ -1,9 +1,24 @@
-import type { ChecklistItem, DraftSection, ExtraQuestion, Scorecard } from "./grants/schemas";
+import type { ChecklistItem, DraftSection, ExtraQuestion, Requirement, Scorecard } from "./grants/schemas";
+import type { HudTractFinding } from "./hud";
 
 export type { DraftSection };
 
+export type DocumentStatus = "not-started" | "in-progress" | "have-it" | "not-applicable";
+
+export const DOCUMENT_STATUS_LABELS: Record<DocumentStatus, string> = {
+  "not-started": "Not started",
+  "in-progress": "Requested",
+  "have-it": "In hand",
+  "not-applicable": "Not applicable",
+};
+
 export interface SavedChecklistItem extends ChecklistItem {
   done: boolean;
+  status: DocumentStatus;
+  /** Where the file lives: shared drive path, URL, or the person holding it. */
+  location: string;
+  /** ISO date the document is needed by. */
+  dueDate: string;
 }
 
 export interface SavedDraft {
@@ -14,6 +29,12 @@ export interface SavedDraft {
   grantUrl: string;
   answers: Record<string, string>;
   extraQuestions: ExtraQuestion[];
+  /** Eligibility and scoring requirements read out of the notice. */
+  requirements: Requirement[];
+  /** Evidence typed straight into the evidence map, keyed by requirement id. */
+  manualEvidence: Record<string, string>;
+  /** HUD low/mod and Opportunity Zone checks run for this project. */
+  hudFindings: HudTractFinding[];
   sections: DraftSection[];
   checklist: SavedChecklistItem[];
   scorecard: Scorecard | null;
@@ -28,6 +49,24 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
+export function normalizeChecklistItem(item: Partial<SavedChecklistItem>): SavedChecklistItem {
+  const done = item.done ?? item.status === "have-it";
+  return {
+    id: item.id ?? `item-${Math.random().toString(36).slice(2, 8)}`,
+    label: item.label ?? "",
+    detail: item.detail ?? "",
+    documentName: item.documentName || item.label || "",
+    source: item.source ?? "",
+    format: item.format ?? "",
+    required: item.required !== false,
+    requirementIds: Array.isArray(item.requirementIds) ? item.requirementIds : [],
+    done,
+    status: item.status ?? (done ? "have-it" : "not-started"),
+    location: item.location ?? "",
+    dueDate: item.dueDate ?? "",
+  };
+}
+
 function normalize(draft: Partial<SavedDraft>): SavedDraft {
   return {
     id: draft.id ?? newDraftId(),
@@ -37,14 +76,18 @@ function normalize(draft: Partial<SavedDraft>): SavedDraft {
     grantUrl: draft.grantUrl ?? "",
     answers: draft.answers ?? {},
     extraQuestions: Array.isArray(draft.extraQuestions) ? draft.extraQuestions : [],
+    requirements: Array.isArray(draft.requirements) ? draft.requirements : [],
+    manualEvidence: draft.manualEvidence ?? {},
+    hudFindings: Array.isArray(draft.hudFindings) ? draft.hudFindings : [],
     sections: Array.isArray(draft.sections) ? draft.sections : [],
-    checklist: Array.isArray(draft.checklist) ? draft.checklist : [],
+    checklist: Array.isArray(draft.checklist) ? draft.checklist.map(normalizeChecklistItem) : [],
     scorecard: draft.scorecard ?? null,
     cityName: draft.cityName ?? "",
     createdAt: draft.createdAt ?? new Date().toISOString(),
     updatedAt: draft.updatedAt ?? new Date().toISOString(),
   };
 }
+
 
 export function loadDrafts(): SavedDraft[] {
   if (!isBrowser()) return [];

@@ -1,7 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Building2, Check, Trash2 } from "lucide-react";
+import { Building2, Check, Loader2, MapPin, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+
+import { hudLookupCity } from "@/lib/grants.functions";
+import { citationSentence, findingHeadline, HUD_SOURCE_NOTE } from "@/lib/hud";
+
 
 import { SiteHeader } from "@/components/SiteHeader";
 import { Button } from "@/components/ui/button";
@@ -52,6 +56,24 @@ function ProfilePage() {
   const [profile, setProfile] = useState<CityProfile>(EMPTY_PROFILE);
   const [hydrated, setHydrated] = useState(false);
   const [keywordText, setKeywordText] = useState("");
+  const [hudLoading, setHudLoading] = useState(false);
+
+  const runHudLookup = async () => {
+    const city = profile.cityName.trim();
+    if (!city) return;
+    setHudLoading(true);
+    try {
+      const finding = await hudLookupCity({ data: { city, state: "TX" } });
+      const next = saveProfile({ ...profile, hudFindings: finding });
+      setProfile(next);
+      toast.success("HUD low/mod and Opportunity Zone data saved to your profile.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "HUD had no match for that city name.");
+    } finally {
+      setHudLoading(false);
+    }
+  };
+
 
   useEffect(() => {
     const existing = loadProfile();
@@ -196,6 +218,37 @@ function ProfilePage() {
             ))}
           </div>
         </Section>
+
+        <Section
+          title="HUD low-income and Opportunity Zone status"
+          hint="Pulled live from HUD's Low- and Moderate-Income Summary Data and the Qualified Opportunity Zone tract list. Many programs score or gate on these figures, and citing them beats estimating."
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-sm"
+              disabled={hudLoading || !profile.cityName.trim()}
+              onClick={runHudLookup}
+            >
+              {hudLoading ? <Loader2 className="size-4 animate-spin" /> : <MapPin className="size-4" />}
+              {profile.hudFindings ? "Re-check with HUD" : "Check my city with HUD"}
+            </Button>
+            {!profile.cityName.trim() ? (
+              <span className="text-xs text-muted-foreground">Enter your city name first.</span>
+            ) : null}
+          </div>
+          {profile.hudFindings ? (
+            <div className="mt-3 border border-border p-4">
+              <p className="text-sm font-medium">{profile.hudFindings.placeName}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{findingHeadline(profile.hudFindings)}</p>
+              <p className="mt-2 text-sm text-muted-foreground">{citationSentence(profile.hudFindings)}</p>
+              <p className="mt-2 text-[11px] text-muted-foreground">{HUD_SOURCE_NOTE}</p>
+            </div>
+          ) : null}
+        </Section>
+
+
 
         <Section title="What you are trying to fund">
           <Field label="Priority categories">

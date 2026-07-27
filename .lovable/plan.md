@@ -1,60 +1,53 @@
 ## Goal
 
-Two problems: (1) a city shouldn't miss a grant it qualifies for, and (2) the generated draft should be good enough that a reviewer takes it seriously.
+Make the draft defensible: every eligibility requirement the program states is visibly answered by something you wrote, every checklist item names the specific document that satisfies it, and HUD's own low-income and Opportunity Zone data is pulled in as citable evidence.
 
 ---
 
-## Part 1 — Don't miss anything
+## 1. Evidence map (answers → eligibility criteria)
 
-**Deeper federal pull.** Today the Grants.gov call is a single 200-row request that only returns titles and agencies, so searching never touches the actual program text. Change it to:
-- Paginate through all municipal-eligible results (eligibility `02`), plus special-district/county eligibilities that Texas cities routinely qualify under, deduped.
-- Also pull results for `oppStatuses: forecasted` so upcoming cycles show up months early.
-- Fetch and cache full descriptions in the background so keyword search, category rules, and fit scoring work on the real synopsis rather than the title alone.
-- Show a "last synced" timestamp and a clear banner when the federal feed fails, instead of silently returning fewer grants.
+A new step between the questionnaire and the generated narrative.
 
-**City profile (one-time, stored in the browser).** A short setup screen capturing:
-- City name, county, population, whether it's a general-law or home-rule city
-- Utilities/services operated (water, wastewater, stormwater, airport, transit, library, museum, parks, PD, FD, EMS)
-- Designations that unlock funding: colonias, disadvantaged/LMI, Main Street city, Certified Local Government, rural, border, MPO membership
-- Current priorities and any pending capital projects
-- Grant capacity: staff time available, cash match available, ability to front costs for reimbursement
+- When the wizard loads a grant, the app reads the NOFO text and extracts a list of **requirements**: each one gets a short label, the verbatim snippet it came from, and a type (eligibility, threshold/mandatory, or scoring criterion).
+- Each requirement is matched to the answers and profile fields that address it, with a status: **covered**, **partly covered** (something is there but thin or contains a bracketed blank), or **not addressed**.
+- The step shows a coverage bar and a table: requirement → what the program says → your evidence → status. Anything not covered has a "answer this" link that jumps back to the exact question, or an inline box to add the missing evidence right there.
+- A hard-blocker flag: if a requirement is one the city plainly can't meet (population cap, ineligible applicant type, required registration missing), it's called out at the top rather than buried.
+- The evidence map is saved with the draft, feeds the drafting prompt (so the narrative explicitly answers each criterion), is re-checked after generation, and is exported as a "Requirement coverage" appendix in Word and PDF.
 
-**Fit scoring.** Every grant gets scored against the profile using deterministic rules (eligibility text, category vs. services operated, population thresholds, match capacity vs. cost-share, deadline feasibility) — no AI call, so the whole list ranks instantly. Each grant shows a fit badge plus one line of *why* ("You operate a wastewater system and cost share is waived for cities under 10,000"), and an explicit "likely not eligible" flag with the reason, so nothing is hidden — only reordered.
+## 2. Checklist items tied to documents
 
-**Coverage views** on the finder: Closing in 30 days, Newly posted since your last visit, Forecasted/opening soon, and Strong fits for your city. A saved-keyword watchlist highlights matches ("splash pad", "lift station") across all sources.
+Each checklist item gains structure instead of being a bare label:
 
----
+- **Document name** (e.g. "Council resolution authorizing application"), **source** (who produces it — city secretary, engineer, auditor, SAM.gov), **format** expected, and whether it's required or conditional.
+- **Status**: not started / in progress / have it / not applicable, plus a location note (where the file lives — shared drive path, URL, person) and a due date derived from the grant deadline.
+- **Linked requirement**: where the NOFO ties a document to a criterion, the checklist item points at that requirement in the evidence map, and vice versa.
+- **Export**: a "Document request packet" you can download — a per-item sheet listing what's needed, from whom, by when, and why the program requires it, suitable for emailing to staff. Also included as an appendix in the draft's Word/PDF export.
 
-## Part 2 — A submission-quality draft
+No file uploads; everything stays tracked locally in the browser as it is today.
 
-**Profile auto-fill.** The city profile pre-answers the applicant, population, and capacity questions, so the wizard starts partly complete and stays consistent across every application.
+## 3. HUD low-income and Opportunity Zone check
 
-**Grant-specific questions.** After the eight core questions, the app reads the actual NOFO text and generates 3–6 additional questions tied to *that* program's stated review criteria and required elements (e.g. a benefit-cost ratio for hazard mitigation, an LMI percentage for CDBG, a service-population count for library funds). This is where most weak applications lose points.
+Two lookups, both live against HUD/Census open data — nothing hardcoded or guessed.
 
-**Two-pass writing.** Pass one drafts the nine sections. Pass two acts as a program officer: it re-reads the draft against the funder's own evaluation criteria and rewrites for specificity, tightening vague claims and making every assertion traceable to an answer. Nothing is invented — unknowns stay as clearly bracketed placeholders.
+**Citywide (on the city profile page):** enter the city, and the app reports the HUD Low- and Moderate-Income Summary Data percentage for that place, whether it exceeds the 51% CDBG threshold, and how many Opportunity Zone tracts fall inside the city, with the tract numbers. Results are stored on the profile and feed fit scoring — grants that require LMI or OZ status get scored and explained using the real number instead of a checkbox.
 
-**Reviewer scorecard.** After generation, a panel scores the draft on the criteria that funder actually publishes (need, capacity, outcomes, budget justification, match) with a short list of concrete gaps: "No baseline number for overflow frequency", "Match source not identified", "No evaluation method for outcome 2". Each gap links to the section and question that fixes it.
+**Project-specific (inside the draft wizard):** enter the project address or census tract; the app geocodes it, returns the tract's LMI percentage, low-income status and Opportunity Zone designation, and offers a ready-to-paste sentence with the tract ID and data vintage for the Statement of Need. That finding attaches to the draft as evidence and can satisfy an LMI or distressed-area requirement in the evidence map.
 
-**Section-level control.** Regenerate, expand, or shorten any single section with an instruction ("make the need statement more urgent", "add detail on the maintenance plan") without touching the rest, plus word-count targets per section.
-
-**Attachment checklist.** A per-grant checklist of what has to accompany the narrative — SAM.gov/UEI registration, resolution of the governing body, audited financials, engineering report, environmental review, letters of support, budget forms — extracted from the NOFO where possible with a standard municipal baseline otherwise, each with a done/not-done state saved with the draft.
-
-**Better exports.** Word and PDF get proper heading structure, a cover page with grant number and applicant details, a placeholder audit page listing every unfilled bracket, and the attachment checklist as an appendix.
+If HUD's service is unavailable, the app says so plainly and lets you enter the figure manually rather than silently omitting it.
 
 ---
 
 ## Technical notes
 
-- All new state lives in `localStorage` alongside existing drafts (`src/lib/city-profile.ts`, extended `src/lib/local-drafts.ts`) — still no accounts, no server storage.
-- Fit scoring is pure TypeScript in `src/lib/grants/fit.ts`, called client-side; no per-grant AI cost.
-- New server functions in `src/lib/grants.functions.ts`: `generateGrantQuestions`, `reviewDraft` (scorecard), `reviseSection`, `extractChecklist`. All go through the existing `callAi` helper.
-- Federal fetch changes are confined to `src/lib/grants/grants-gov.server.ts`; description hydration uses the existing in-memory cache with a longer TTL.
-- New routes: `/profile` (city setup) and a checklist tab within the existing draft route. Finder and detail pages gain fit badges.
+- New `src/lib/grants/evidence.ts` (types, coverage matching, status rules) and an AI-backed `extractRequirements` server function in `src/lib/grants.functions.ts`, alongside the existing `extractChecklist`. Requirement extraction is one AI call per grant, cached with the draft.
+- `SavedChecklistItem` and `SavedDraft` in `src/lib/local-drafts.ts` gain the new fields with backward-compatible defaults in `normalize()`, so existing drafts keep working.
+- HUD lookups run through a new server function hitting HUD's public ArcGIS layers (LMISD by place and by tract, Opportunity Zone tracts) plus the Census geocoder for addresses; responses cached in memory like the federal grant feed. No API key required.
+- `CityProfile` gains a `hudFindings` block; `src/lib/grants/fit.ts` reads it so LMI/OZ-dependent grants score off real data.
+- New wizard step in `src/routes/grants.$id.draft.tsx`; `src/lib/export.ts` gains the coverage and document-packet appendices.
 
 ## Sequencing
 
-1. City profile + fit scoring + finder coverage views
-2. Deeper federal pull with full-text hydration
-3. Grant-specific questions + two-pass drafting
-4. Reviewer scorecard + section regeneration
-5. Attachment checklist + upgraded exports
+1. Requirement extraction + evidence map step and export appendix
+2. Checklist item structure, requirement linking, document request packet
+3. HUD citywide lookup on the profile + fit scoring integration
+4. HUD project-address lookup in the wizard, wired into the evidence map

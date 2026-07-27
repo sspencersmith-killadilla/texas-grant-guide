@@ -1,4 +1,5 @@
 import type { GrantCategory } from "./grants/types";
+import { citationSentence, type HudPlaceFinding } from "./hud";
 
 export type MatchCapacity = "" | "none" | "under-50k" | "50k-250k" | "250k-1m" | "over-1m";
 export type StaffCapacity = "" | "none" | "limited" | "dedicated";
@@ -19,8 +20,11 @@ export interface CityProfile {
   canFrontCosts: FrontCosts;
   keywords: string[];
   uei: string;
+  /** Citywide HUD low/mod and Opportunity Zone check, when the city has run one. */
+  hudFindings: HudPlaceFinding | null;
   updatedAt: string;
 }
+
 
 export const SERVICE_OPTIONS: { id: string; label: string; categories: GrantCategory[] }[] = [
   { id: "water", label: "Drinking water system", categories: ["water"] },
@@ -102,8 +106,10 @@ export const EMPTY_PROFILE: CityProfile = {
   canFrontCosts: "",
   keywords: [],
   uei: "",
+  hudFindings: null,
   updatedAt: "",
 };
+
 
 const KEY = "muniCityProfile.v1";
 const VISIT_KEY = "muniLastVisit.v1";
@@ -168,6 +174,8 @@ export function profileSummaryText(profile: CityProfile): string {
     profile.staffCapacity ? `Grant staffing: ${STAFF_CAPACITY_LABELS[profile.staffCapacity]}` : "",
     profile.canFrontCosts ? `Can front costs for reimbursement: ${FRONT_COSTS_LABELS[profile.canFrontCosts]}` : "",
     profile.uei ? `SAM.gov UEI: ${profile.uei}` : "",
+    profile.hudFindings ? `Verified HUD data: ${citationSentence(profile.hudFindings)}` : "",
   ];
   return lines.filter(Boolean).join("\n");
 }
+

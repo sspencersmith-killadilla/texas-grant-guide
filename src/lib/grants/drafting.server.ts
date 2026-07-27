@@ -1,6 +1,15 @@
 import { callAi, parseJsonLoose } from "./ai.server";
-import { SECTION_HEADINGS, type ChecklistItem, type DraftSection, type ExtraQuestion, type Scorecard } from "./schemas";
+import {
+  SECTION_HEADINGS,
+  type ChecklistItem,
+  type DraftSection,
+  type ExtraQuestion,
+  type Requirement,
+  type RequirementKind,
+  type Scorecard,
+} from "./schemas";
 import type { PlainSummary } from "./types";
+
 
 const NO_FABRICATION =
   "You never fabricate statistics, citations, prior awards, partner commitments or dollar figures. Where a specific figure or document is needed but was not provided, insert a clearly marked placeholder in square brackets such as [INSERT 2020 Census population] so city staff know exactly what to fill in. Respond with JSON only.";
@@ -134,10 +143,20 @@ export async function buildDraft(data: {
   grantEligibility?: string;
   cityProfile?: string;
   answers: { question: string; answer: string }[];
+  requirements?: { label: string; kind: string; evidenceHint: string }[];
+  hudNote?: string;
 }): Promise<DraftSection[]> {
   const answers = data.answers
     .map((a) => `Q: ${a.question}\nA: ${a.answer?.trim() || "(not provided)"}`)
     .join("\n\n");
+
+  const requirementBlock = data.requirements?.length
+    ? `REQUIREMENTS THIS APPLICATION MUST DEMONSTRATE\n${data.requirements
+        .map((r) => `- (${r.kind}) ${r.label} — evidence: ${r.evidenceHint}`)
+        .join("\n")}\n\nEvery one of these must be visibly addressed somewhere in the narrative. Where the applicant gave no evidence for one, write the sentence that frames it and leave a clearly bracketed placeholder.\n`
+    : "";
+
+  const hudBlock = data.hudNote ? `VERIFIED HUD DATA (cite this verbatim where relevant)\n${data.hudNote}\n` : "";
 
   const firstPass = await callAi(
     [
@@ -153,6 +172,7 @@ GRANT
 ${contextBlock(data)}
 
 ${data.cityProfile ? `APPLICANT CITY PROFILE\n${data.cityProfile}\n` : ""}
+${requirementBlock}${hudBlock}
 APPLICANT ANSWERS
 ${answers}
 
@@ -165,6 +185,7 @@ Each body should be 2 to 5 paragraphs of flowing prose separated by blank lines.
     ],
     true,
   );
+
 
   const drafted = parseJsonLoose<{ sections?: DraftSection[] }>(firstPass);
   const sections = (drafted?.sections ?? []).filter(
@@ -310,33 +331,167 @@ Return JSON: {"body":"the rewritten section"}`,
   return parsed.body;
 }
 
+/** The requirements a reviewer checks off, extracted from the notice itself. */
+export async function buildRequirements(
+  ctx: GrantContext & { questions: { id: string; label: string }[] },
+): Promise<Requirement[]> {
+  const raw = await callAi(
+    [
+      {
+        role: "system",
+        content:
+          "You are a grant reviewer who reads a notice of funding opportunity and lists exactly what an application must demonstrate to be eligible, complete and competitive. You quote the notice rather than paraphrasing when you can. Respond with JSON only.",
+      },
+      {
+        role: "user",
+        content: `${contextBlock(ctx, 8000)}
+
+QUESTIONS THE APPLICANT IS BEING ASKED
+${ctx.questions.map((q) => `${q.id}: ${q.label}`).join("\n")}
+
+List every requirement this notice imposes on a Texas city applicant. Include three kinds:
+- "eligibility": who may apply and what the applicant must already be or have
+- "mandatory": threshold or completeness requirements the application must satisfy
+- "scoring": criteria the reviewers award points for
+
+For each requirement, say which of the question ids above would supply the evidence. Use only ids from that list; use an empty array if none of them fit.
+
+Return JSON:
+{"requirements":[{
+  "id":"short-kebab-id",
+  "label":"the requirement in plain English, under 14 words",
+  "kind":"eligibility|mandatory|scoring",
+  "quote":"a short verbatim phrase from the notice, or an empty string if the notice does not state it directly",
+  "evidenceHint":"one sentence on what would prove this",
+  "questionIds":["question-id"],
+  "keywords":["three to six distinctive words that would appear in an answer that satisfies this"],
+  "blocking":true or false
+}]}
+List 6 to 14 requirements, eligibility first. Set "blocking" true only when failing it disqualifies the application outright.`,
+      },
+    ],
+    true,
+  );
+
+  const parsed = parseJsonLoose<{ requirements?: Partial<Requirement>[] }>(raw);
+  const rows = (parsed?.requirements ?? []).filter((r) => r && typeof r.label === "string" && r.label.trim());
+  if (rows.length === 0) throw new Error("The eligibility requirements could not be read for this program.");
+
+  const validIds = new Set(ctx.questions.map((q) => q.id));
+  const kinds: RequirementKind[] = ["eligibility", "mandatory", "scoring"];
+
+  return rows.slice(0, 16).map((r, i) => ({
+    id: (r.id && String(r.id).replace(/[^a-z0-9-]/gi, "-")) || `req-${i}`,
+    label: String(r.label),
+    kind: kinds.includes(r.kind as RequirementKind) ? (r.kind as RequirementKind) : "mandatory",
+    quote: typeof r.quote === "string" ? r.quote.slice(0, 400) : "",
+    evidenceHint: typeof r.evidenceHint === "string" ? r.evidenceHint : "",
+    questionIds: Array.isArray(r.questionIds) ? r.questionIds.map(String).filter((id) => validIds.has(id)) : [],
+    keywords: Array.isArray(r.keywords) ? r.keywords.map(String).slice(0, 8) : [],
+    blocking: r.blocking === true,
+  }));
+}
+
 const BASELINE_CHECKLIST: ChecklistItem[] = [
-  { id: "uei", label: "Active SAM.gov registration and UEI number", detail: "Federal awards cannot be made without an active registration. Renewal takes weeks, so start early." },
-  { id: "resolution", label: "Resolution from the governing body authorizing the application", detail: "Most funders require a council resolution naming the project and authorizing an official to sign." },
-  { id: "financials", label: "Most recent audited financial statements", detail: "Usually the last completed fiscal year, sometimes the last two or three." },
-  { id: "budget", label: "Completed budget forms with a line-item budget", detail: "Program budget forms are separate from the narrative budget justification." },
-  { id: "match", label: "Documentation of the local match", detail: "A budget page, council minutes or a letter identifying the exact source of matching funds." },
-  { id: "support", label: "Letters of support or commitment from partners", detail: "Name specific commitments rather than general encouragement." },
-  { id: "signature", label: "Signed certifications and assurances", detail: "Lobbying, non-discrimination, drug-free workplace and similar standard federal forms." },
+  {
+    id: "uei",
+    label: "Active SAM.gov registration and UEI number",
+    detail: "Federal awards cannot be made without an active registration. Renewal takes weeks, so start early.",
+    documentName: "SAM.gov entity registration confirmation showing the UEI and expiration date",
+    source: "City Secretary or Finance Director via sam.gov",
+    format: "PDF screenshot or printout",
+    required: true,
+  },
+  {
+    id: "resolution",
+    label: "Resolution from the governing body authorizing the application",
+    detail: "Most funders require a council resolution naming the project and authorizing an official to sign.",
+    documentName: "Signed council resolution with the project name and authorized signatory",
+    source: "City Secretary, adopted at a posted council meeting",
+    format: "Signed PDF with the city seal",
+    required: true,
+  },
+  {
+    id: "financials",
+    label: "Most recent audited financial statements",
+    detail: "Usually the last completed fiscal year, sometimes the last two or three.",
+    documentName: "Annual Comprehensive Financial Report for the most recent fiscal year",
+    source: "Finance Director or the city's external auditor",
+    format: "PDF",
+    required: true,
+  },
+  {
+    id: "budget",
+    label: "Completed budget forms with a line-item budget",
+    detail: "Program budget forms are separate from the narrative budget justification.",
+    documentName: "Program budget form plus a line-item project budget",
+    source: "Finance Director with the project engineer's cost estimate",
+    format: "Program form (PDF) and spreadsheet",
+    required: true,
+  },
+  {
+    id: "match",
+    label: "Documentation of the local match",
+    detail: "A budget page, council minutes or a letter identifying the exact source of matching funds.",
+    documentName: "Match commitment letter or council minutes identifying the funding source",
+    source: "Finance Director or City Manager",
+    format: "Signed PDF",
+    required: true,
+  },
+  {
+    id: "support",
+    label: "Letters of support or commitment from partners",
+    detail: "Name specific commitments rather than general encouragement.",
+    documentName: "Partner letters on letterhead stating specific commitments",
+    source: "Project partners, requested by the City Manager",
+    format: "Signed PDF letters",
+    required: false,
+  },
+  {
+    id: "signature",
+    label: "Signed certifications and assurances",
+    detail: "Lobbying, non-discrimination, drug-free workplace and similar standard federal forms.",
+    documentName: "SF-424B assurances and program certification forms",
+    source: "Authorized official named in the resolution",
+    format: "Signed PDF forms",
+    required: true,
+  },
 ];
 
-export async function buildChecklist(ctx: GrantContext): Promise<ChecklistItem[]> {
+export async function buildChecklist(
+  ctx: GrantContext & { requirements?: { id: string; label: string }[] },
+): Promise<ChecklistItem[]> {
   try {
     const raw = await callAi(
       [
         {
           role: "system",
           content:
-            "You list the attachments and registrations a municipal applicant must have ready alongside the narrative. You only list items supported by the notice text or standard for this type of award. Respond with JSON only.",
+            "You list the attachments and registrations a municipal applicant must have ready alongside the narrative. Every item names a specific document a city can actually produce and says who produces it. You only list items supported by the notice text or standard for this type of award. Respond with JSON only.",
         },
         {
           role: "user",
           content: `${contextBlock(ctx, 7000)}
 
+${
+  ctx.requirements?.length
+    ? `REQUIREMENTS ALREADY IDENTIFIED FOR THIS PROGRAM\n${ctx.requirements.map((r) => `${r.id}: ${r.label}`).join("\n")}\n\nWhere a document proves one of these, list its id in requirementIds. Use only ids from that list.`
+    : ""
+}
+
 List every attachment, form, registration, plan, certification or approval this application requires from a Texas city.
 
-Return JSON: {"items":[{"id":"short-kebab-id","label":"short name of the item","detail":"one sentence on what it is and where a city gets it"}]}
-List 6 to 14 items, most time-consuming to obtain first.`,
+Return JSON: {"items":[{
+  "id":"short-kebab-id",
+  "label":"short name of the item",
+  "detail":"one sentence on what it is and why this program needs it",
+  "documentName":"the exact document, named the way a city would file it",
+  "source":"the person, office or website that produces it",
+  "format":"the expected format, e.g. Signed PDF, spreadsheet, web confirmation",
+  "required":true or false,
+  "requirementIds":["requirement-id"]
+}]}
+List 6 to 14 items, most time-consuming to obtain first. Set "required" false for items that only apply in certain cases.`,
         },
       ],
       true,
@@ -345,14 +500,23 @@ List 6 to 14 items, most time-consuming to obtain first.`,
     const parsed = parseJsonLoose<{ items?: ChecklistItem[] }>(raw);
     const items = (parsed?.items ?? []).filter((i) => i && typeof i.label === "string" && i.label.trim());
     if (items.length >= 4) {
+      const validReqIds = new Set((ctx.requirements ?? []).map((r) => r.id));
       return items.slice(0, 16).map((i, idx) => ({
         id: (i.id && String(i.id).replace(/[^a-z0-9-]/gi, "-")) || `item-${idx}`,
         label: i.label,
         detail: i.detail ?? "",
+        documentName: i.documentName || i.label,
+        source: i.source ?? "",
+        format: i.format ?? "",
+        required: i.required !== false,
+        requirementIds: Array.isArray(i.requirementIds)
+          ? i.requirementIds.map(String).filter((id) => validReqIds.has(id))
+          : [],
       }));
     }
   } catch {
     // fall through to the standard municipal baseline
   }
-  return BASELINE_CHECKLIST;
+  return BASELINE_CHECKLIST.map((i) => ({ ...i, requirementIds: [] }));
+
 }
