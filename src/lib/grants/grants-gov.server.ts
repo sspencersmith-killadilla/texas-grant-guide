@@ -83,42 +83,143 @@ interface SearchHit {
   number: string;
   title: string;
   agency: string;
+  agencyCode?: string;
   openDate?: string;
   closeDate?: string;
   oppStatus?: string;
 }
 
-export async function fetchFederalGrants(): Promise<Grant[]> {
+/**
+ * Eligibility codes a Texas city can realistically apply under.
+ * 02 = city/township, 01 = county, 04 = special district, 25 = others, 99 = unrestricted.
+ */
+const ELIGIBILITY_CODES = ["02", "01", "04", "25", "99"];
+const PAGE_SIZE = 100;
+const MAX_PAGES_PER_CODE = 8;
+
+async function searchPage(code: string, start: number): Promise<{ hits: SearchHit[]; total: number }> {
   const res = await fetch(SEARCH_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      rows: 200,
+      rows: PAGE_SIZE,
+      startRecordNum: start,
       oppStatuses: "posted|forecasted",
-      eligibilities: CITY_ELIGIBILITY,
+      eligibilities: code,
       sortBy: "closeDate|asc",
     }),
   });
-
   if (!res.ok) throw new Error(`Grants.gov search failed (${res.status})`);
-  const json = (await res.json()) as { errorcode: number; data?: { oppHits?: SearchHit[] } };
-  const hits = json.data?.oppHits ?? [];
-  const now = new Date().toISOString();
-
-  return hits.map((hit) => ({
-    id: `fed-${hit.id}`,
-    source: "federal" as const,
-    title: decodeEntities(hit.title),
-    agency: decodeEntities(hit.agency),
-    number: hit.number,
-    category: categorize(`${hit.title} ${hit.agency}`),
-    openDate: parseMmDdYyyy(hit.openDate),
-    closeDate: parseMmDdYyyy(hit.closeDate),
-    url: `https://www.grants.gov/search-results-detail/${hit.id}`,
-    description: "",
-    lastChecked: now,
-  }));
+  const json = (await res.json()) as {
+    data?: { oppHits?: SearchHit[]; hitCount?: number };
+  };
+  return { hits: json.data?.oppHits ?? [], total: json.data?.hitCount ?? 0 };
 }
+
+/** Pull every municipal-eligible opportunity across all relevant eligibility codes. */
+export async function fetchFederalGrants(): Promise<Grant[]> {
+  const now = new Date().toISOString();
+  const byId = new Map<string, Grant>();
+  let anySuccess = false;
+  let lastError: unknown = null;
+
+  for (const code of ELIGIBILITY_CODES) {
+    try {
+      let start = 0;
+      for (let page = 0; page < MAX_PAGES_PER_CODE; page += 1) {
+        const { hits, total } = await searchPage(code, start);
+        anySuccess = true;
+        if (hits.length === 0) break;
+
+        for (const hit of hits) {
+          const id = `fed-${hit.id}`;
+          const existing = byId.get(id);
+          if (existing) {
+            if (!existing.eligibilityCodes?.includes(code)) existing.eligibilityCodes?.push(code);
+            continue;
+          }
+          const title = decodeEntities(hit.title ?? "");
+          byId.set(id, {
+            id,
+            source: "federal",
+            title,
+            agency: decodeEntities(hit.agency ?? "Federal agency"),
+            number: hit.number,
+            category: categorize(`${title} ${hit.agency ?? ""}`),
+            status: /forecast/i.test(hit.oppStatus ?? "") ? "forecasted" : "posted",
+            eligibilityCodes: [code],
+            openDate: parseMmDdYyyy(hit.openDate),
+            closeDate: parseMmDdYyyy(hit.closeDate),
+            url: `https://www.grants.gov/search-results-detail/${hit.id}`,
+            description: "",
+            lastChecked: now,
+          });
+        }
+
+        start += hits.length;
+        if (start >= total) break;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (!anySuccess) {
+    throw lastError instanceof Error ? lastError : new Error("Grants.gov could not be reached");
+  }
+
+  const grants = [...byId.values()];
+  await hydrateDescriptions(grants);
+  return grants;
+}
+
+/**
+ * Grants.gov search only returns titles, so keyword search and fit scoring would be blind
+ * to the actual program text. Pull full synopses for the most relevant opportunities,
+ * newest deadlines first, inside a time budget so the request never hangs.
+ */
+async function hydrateDescriptions(grants: Grant[], budgetMs = 22_000, concurrency = 10) {
+  const deadline = Date.now() + budgetMs;
+  const queue = [...grants]
+    .filter((g) => !g.description)
+    .sort((a, b) => {
+      const da = a.closeDate ? Date.parse(a.closeDate) : Number.MAX_SAFE_INTEGER;
+      const db = b.closeDate ? Date.parse(b.closeDate) : Number.MAX_SAFE_INTEGER;
+      return da - db;
+    });
+
+  let cursor = 0;
+  const workers = Array.from({ length: concurrency }, async () => {
+    while (cursor < queue.length && Date.now() < deadline) {
+      const grant = queue[cursor];
+      cursor += 1;
+      try {
+        const detail = await fetchFederalGrantDetail(grant.id);
+        if (detail) {
+          Object.assign(grant, {
+            description: detail.description,
+            eligibility: detail.eligibility,
+            deadlineNote: detail.deadlineNote,
+            estimatedFunding: detail.estimatedFunding,
+            awardCeiling: detail.awardCeiling,
+            awardFloor: detail.awardFloor,
+            costSharing: detail.costSharing,
+            contact: detail.contact,
+            agency: detail.agency || grant.agency,
+            category: detail.category,
+            openDate: detail.openDate ?? grant.openDate,
+            closeDate: detail.closeDate ?? grant.closeDate,
+          });
+        }
+      } catch {
+        // leave the title-only record in place
+      }
+    }
+  });
+
+  await Promise.all(workers);
+}
+
 
 export async function fetchFederalGrantDetail(rawId: string): Promise<Grant | null> {
   const numericId = Number(rawId.replace(/^fed-/, ""));

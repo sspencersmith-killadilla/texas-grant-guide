@@ -1,4 +1,4 @@
-import type { SavedDraft } from "./local-drafts";
+import { findPlaceholders, type SavedDraft } from "./local-drafts";
 
 function fileBase(draft: SavedDraft) {
   return draft.grantTitle
@@ -14,6 +14,41 @@ function paragraphs(body: string) {
     .map((p) => p.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 }
+
+/** Submission-prep pages appended after the narrative. */
+function appendixLines(draft: SavedDraft): { heading: string; items: string[] }[] {
+  const blocks: { heading: string; items: string[] }[] = [];
+
+  const placeholders = findPlaceholders(draft.sections);
+  if (placeholders.length > 0) {
+    blocks.push({
+      heading: "Before you submit: blanks to fill in",
+      items: placeholders.map((p) => `[${p}]`),
+    });
+  }
+
+  if (draft.checklist.length > 0) {
+    blocks.push({
+      heading: "Documents and registrations to gather",
+      items: draft.checklist.map((c) => `${c.done ? "[x]" : "[ ]"} ${c.label}${c.detail ? ` — ${c.detail}` : ""}`),
+    });
+  }
+
+  if (draft.scorecard) {
+    const gaps = draft.scorecard.gaps.map((g) => `${g.issue}${g.fix ? ` — ${g.fix}` : ""}`);
+    blocks.push({
+      heading: `Reviewer scorecard (${draft.scorecard.overall}/100)`,
+      items: [
+        draft.scorecard.summary,
+        ...draft.scorecard.criteria.map((c) => `${c.name}: ${c.score}/10 — ${c.comment}`),
+        ...(gaps.length ? ["Gaps to close:", ...gaps] : []),
+      ].filter(Boolean),
+    });
+  }
+
+  return blocks;
+}
+
 
 export async function downloadDocx(draft: SavedDraft) {
   const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await import("docx");
@@ -48,6 +83,26 @@ export async function downloadDocx(draft: SavedDraft) {
       );
     }
   }
+
+  for (const block of appendixLines(draft)) {
+    children.push(
+      new Paragraph({
+        heading: HeadingLevel.HEADING_1,
+        children: [new TextRun({ text: block.heading, bold: true, size: 26 })],
+        spacing: { before: 400, after: 160 },
+        pageBreakBefore: true,
+      }),
+    );
+    for (const item of block.items) {
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: item, size: 21 })],
+          spacing: { after: 120, line: 280 },
+        }),
+      );
+    }
+  }
+
 
   children.push(
     new Paragraph({
@@ -130,6 +185,32 @@ export async function downloadPdf(draft: SavedDraft) {
     }
     y += 8;
   }
+
+  const blocks = appendixLines(draft);
+  if (blocks.length > 0) {
+    doc.addPage();
+    y = margin;
+    for (const block of blocks) {
+      ensureSpace(40);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.text(block.heading, margin, y);
+      y += 20;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      for (const item of block.items) {
+        for (const line of doc.splitTextToSize(item, width) as string[]) {
+          ensureSpace(15);
+          doc.text(line, margin, y);
+          y += 15;
+        }
+        y += 6;
+      }
+      y += 12;
+    }
+  }
+
 
   ensureSpace(40);
   doc.setFontSize(9);

@@ -40,6 +40,8 @@ export interface Grant {
   agency: string;
   number?: string;
   category: GrantCategory;
+  status?: "posted" | "forecasted";
+  eligibilityCodes?: string[];
   openDate?: string;
   closeDate?: string;
   deadlineNote?: string;
@@ -54,6 +56,7 @@ export interface Grant {
   contact?: string;
   lastChecked: string;
 }
+
 
 export interface PlainSummary {
   headline: string;
