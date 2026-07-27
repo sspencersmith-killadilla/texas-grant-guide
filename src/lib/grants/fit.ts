@@ -106,7 +106,7 @@ export function scoreGrant(grant: Grant, profile: CityProfile | null): FitResult
   );
   if (matchedService) {
     score += 16;
-    reasons.push(`You operate ${matchedService.label.toLowerCase()}, which is what this ${CATEGORY_LABELS[grant.category].toLowerCase()} program funds`);
+    reasons.push(`You operate a ${matchedService.label.toLowerCase()}, which is what this ${CATEGORY_LABELS[grant.category].toLowerCase()} program funds`);
   } else if (grant.category !== "other" && profile.services.length > 0) {
     const anyServiceInCategory = SERVICE_OPTIONS.some((s) => s.categories.includes(grant.category));
     if (anyServiceInCategory) {
