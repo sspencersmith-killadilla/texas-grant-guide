@@ -756,16 +756,22 @@ function EvidenceMap({
   onHudInput: (value: string) => void;
   onHudLookup: () => void;
   cityFinding: CityProfile["hudFindings"];
+  defaultOpen: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <section className="mt-6 border border-border bg-card p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="text-sm font-semibold">Evidence map</h2>
-        <p className="text-xs text-muted-foreground">
+        <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setOpen((o) => !o)}>
           {stats.covered} covered · {stats.partial} thin · {stats.missing} not addressed
-        </p>
+        </button>
       </div>
       <Progress value={stats.percent} className="mt-2 h-1.5" />
+
+      {!open ? null : (
+        <>
+
 
       {stats.blockers.length > 0 ? (
         <p className="mt-3 flex items-start gap-2 border border-urgent/50 p-3 text-xs text-muted-foreground">
