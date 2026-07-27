@@ -482,6 +482,8 @@ function DraftWizard() {
           hudLoading={hudLoading}
           onHudInput={setHudInput}
           onHudLookup={handleHudLookup}
+          defaultOpen={sections.length > 0}
+
           cityFinding={profile?.hudFindings ?? null}
         />
       ) : null}
