@@ -744,6 +744,8 @@ function EvidenceMap({
   onHudInput,
   onHudLookup,
   cityFinding,
+  defaultOpen,
+
 }: {
   coverage: Coverage[];
   stats: ReturnType<typeof coverageStats>;
