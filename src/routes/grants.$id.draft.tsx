@@ -880,7 +880,10 @@ function EvidenceMap({
           </ul>
         ) : null}
       </div>
+        </>
+      )}
     </section>
+
   );
 }
 
