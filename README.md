@@ -27,3 +27,7 @@ npm run dev
 - TypeScript
 - React
 - Tailwind CSS
+
+## License
+
+MIT, see [LICENSE](LICENSE).
